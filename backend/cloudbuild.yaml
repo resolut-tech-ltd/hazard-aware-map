@@ -1,0 +1,58 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/bump-aware-api:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/bump-aware-api:latest'
+      - '.'
+    dir: 'backend'
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/bump-aware-api:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'gcr.io/$PROJECT_ID/bump-aware-api:latest'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'bump-aware-api'
+      - '--image'
+      - 'gcr.io/$PROJECT_ID/bump-aware-api:$COMMIT_SHA'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--set-env-vars'
+      - 'DATABASE_URL=$$DATABASE_URL,SECRET_KEY=$$SECRET_KEY,API_V1_PREFIX=/api/v1,PROJECT_NAME=Bump Aware API,DEBUG=False,ALLOWED_ORIGINS=https://bump-api.resoluttech.ltd'
+      - '--add-cloudsql-instances'
+      - '$$CLOUD_SQL_CONNECTION_NAME'
+      - '--max-instances'
+      - '10'
+      - '--min-instances'
+      - '0'
+      - '--memory'
+      - '512Mi'
+      - '--cpu'
+      - '1'
+      - '--timeout'
+      - '300'
+
+images:
+  - 'gcr.io/$PROJECT_ID/bump-aware-api:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/bump-aware-api:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

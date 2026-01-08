@@ -1,0 +1,65 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+logs/
+
+# Dependencies
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+env/
+*.egg-info/
+
+# Build outputs
+dist/
+build/
+*.apk
+*.ipa
+*.aab
+
+# Database
+*.db
+*.sqlite
+
+# Temporary
+.tmp/
+temp/
+
+# Mobile - Android
+mobile/android/
+!mobile/android/app/src/main/AndroidManifest.xml
+!mobile/android/app/src/main/res/xml/network_security_config.xml
+
+# Mobile - iOS
+mobile/ios/
+
+# API Keys and Secrets
+mobile/src/services/MapsConfigService.ts
+**/google-services.json
+**/GoogleService-Info.plist
+
+# Gradle
+.gradle/
+*.keystore
+*.jks
+
+# Local development notes
+*.local.md

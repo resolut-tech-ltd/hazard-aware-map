@@ -1,0 +1,45 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const GOOGLE_MAPS_API_KEY = '@bump_aware_google_maps_key';
+
+export class MapsConfigService {
+  private static instance: MapsConfigService;
+  private cachedApiKey: string | null = null;
+
+  private constructor() {}
+
+  public static getInstance(): MapsConfigService {
+    if (!MapsConfigService.instance) {
+      MapsConfigService.instance = new MapsConfigService();
+    }
+    return MapsConfigService.instance;
+  }
+
+  public async getApiKey(): Promise<string | null> {
+    try {
+      if (this.cachedApiKey !== null) {
+        return this.cachedApiKey;
+      }
+
+      const savedKey = await AsyncStorage.getItem(GOOGLE_MAPS_API_KEY);
+      this.cachedApiKey = savedKey;
+      return savedKey;
+    } catch (error) {
+      console.error('Failed to load Google Maps API key:', error);
+      return null;
+    }
+  }
+
+  public async setApiKey(key: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem(GOOGLE_MAPS_API_KEY, key);
+      this.cachedApiKey = key;
+    } catch (error) {
+      console.error('Failed to save Google Maps API key:', error);
+    }
+  }
+
+  public clearCache(): void {
+    this.cachedApiKey = null;
+  }
+}

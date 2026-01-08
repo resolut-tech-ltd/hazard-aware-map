@@ -1,0 +1,54 @@
+{
+  "name": "bump-aware-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "start": "react-native start",
+    "stop": "react-native stop",
+    "test": "jest",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-navigation/bottom-tabs": "^6.5.11",
+    "@react-navigation/native": "^6.1.9",
+    "axios": "^1.6.5",
+    "date-fns": "^3.0.6",
+    "react": "18.2.0",
+    "react-native": "0.73.2",
+    "react-native-background-actions": "^3.0.0",
+    "react-native-device-info": "^15.0.1",
+    "react-native-fs": "^2.20.0",
+    "react-native-geolocation-service": "^5.3.1",
+    "react-native-maps": "1.14.0",
+    "react-native-safe-area-context": "^4.8.2",
+    "react-native-screens": "3.29.0",
+    "react-native-sensors": "^7.3.6",
+    "react-native-share": "^12.2.2",
+    "react-native-sqlite-storage": "^6.0.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.23.7",
+    "@babel/preset-env": "^7.23.7",
+    "@babel/runtime": "^7.23.7",
+    "@react-native/babel-preset": "^0.73.19",
+    "@react-native/eslint-config": "^0.73.2",
+    "@react-native/metro-config": "^0.73.3",
+    "@react-native/typescript-config": "^0.73.1",
+    "@types/react": "^18.2.48",
+    "@types/react-test-renderer": "^18.0.7",
+    "babel-jest": "^29.7.0",
+    "babel-plugin-module-resolver": "^5.0.2",
+    "eslint": "^8.56.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.1.1",
+    "react-test-renderer": "18.2.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
