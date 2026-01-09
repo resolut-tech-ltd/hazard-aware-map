@@ -7,8 +7,8 @@ A crowd-sourced road hazard detection and alerting system that uses mobile senso
 <table>
   <tr>
     <td><img src="screenshots/demo-app.jpeg" alt="Monitor Screen" width="250"/></td>
-    <td><img src="screenshots/demo-app2.jpeg" alt="Map Screen" width="250"/></td>
-    <td><img src="screenshots/demo-app3.jpeg" alt="Settings Screen" width="250"/></td>
+    <td><img src="screenshots/demo-app5.jpeg" alt="Map Screen" width="250"/></td>
+    <td><img src="screenshots/demo-app7.jpeg" alt="Settings Screen" width="250"/></td>
   </tr>
   <tr>
     <td align="center">Monitor Screen</td>
