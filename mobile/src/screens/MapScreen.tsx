@@ -5,13 +5,11 @@ import {
   Text,
   ActivityIndicator,
   TouchableOpacity,
-  TextInput,
-  Modal,
   Alert,
   Platform,
-  ScrollView,
-  KeyboardAvoidingView,
   Linking,
+  FlatList,
+  Modal,
 } from 'react-native';
 import MapView, {Marker, Circle, PROVIDER_GOOGLE, Polyline} from 'react-native-maps';
 import {useIsFocused} from '@react-navigation/native';
@@ -20,6 +18,7 @@ import {LocationService} from '@services/LocationService';
 import {ApiService} from '@services/ApiService';
 import {MapsConfigService} from '@services/MapsConfigService';
 import {TripService, type Location as TripLocation} from '@services/TripService';
+import {RecentSearchesService, type RecentSearch} from '@services/RecentSearchesService';
 import type {Hazard} from '../types';
 
 export function MapScreen(): React.JSX.Element {
@@ -33,17 +32,21 @@ export function MapScreen(): React.JSX.Element {
   const tilesLoadTimeout = useRef<NodeJS.Timeout | null>(null);
 
   // Trip mode state
-  const [showDestinationModal, setShowDestinationModal] = useState(false);
-  const [destinationQuery, setDestinationQuery] = useState('');
   const [destination, setDestination] = useState<TripLocation | null>(null);
   const [isTripActive, setIsTripActive] = useState(false);
   const [tripStats, setTripStats] = useState({
     distanceTraveled: 0,
     hazardsAvoided: 0,
   });
-  const [useCoordinates, setUseCoordinates] = useState(false);
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState<string | null>(null);
   const tripService = TripService.getInstance();
+
+  // Search UI state
+  const [searchModalVisible, setSearchModalVisible] = useState(false);
+  const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
+  const [selectedPlaceName, setSelectedPlaceName] = useState('');
+  const recentSearchesService = RecentSearchesService.getInstance();
+  const searchInputRef = useRef<any>(null);
 
   useEffect(() => {
     initializeMap();
@@ -70,8 +73,21 @@ export function MapScreen(): React.JSX.Element {
     if (isFocused) {
       checkApiKey();
       loadGoogleMapsApiKey();
+      loadRecentSearches();
     }
   }, [isFocused]);
+
+  // Set search input text when modal opens with existing selection
+  useEffect(() => {
+    if (searchModalVisible && selectedPlaceName && searchInputRef.current) {
+      searchInputRef.current?.setAddressText(selectedPlaceName);
+    }
+  }, [searchModalVisible]);
+
+  const loadRecentSearches = async () => {
+    const searches = await recentSearchesService.getRecentSearches();
+    setRecentSearches(searches);
+  };
 
   const loadGoogleMapsApiKey = async () => {
     try {
@@ -230,12 +246,20 @@ export function MapScreen(): React.JSX.Element {
   };
 
   // Trip mode functions
-  const handleSetDestination = (lat: number, lon: number, name?: string) => {
+  const handleSetDestination = async (lat: number, lon: number, name?: string, description?: string) => {
     const dest = {latitude: lat, longitude: lon};
     setDestination(dest);
-    setShowDestinationModal(false);
-    setDestinationQuery('');
-    setUseCoordinates(false);
+    setSearchModalVisible(false);
+
+    // Save to recent searches
+    if (name && description) {
+      await recentSearchesService.addRecentSearch(name, description, lat, lon);
+      await loadRecentSearches();
+    }
+
+    // Keep the place name for display
+    const displayName = name || 'Selected location';
+    setSelectedPlaceName(displayName);
 
     // Center map to show both user and destination
     if (userLocation && mapRef.current) {
@@ -247,30 +271,40 @@ export function MapScreen(): React.JSX.Element {
         },
       );
     }
-
-    if (name) {
-      Alert.alert('Destination Set', `Destination: ${name}`);
-    }
   };
 
   const handlePlaceSelect = (data: any, details: any) => {
     if (details?.geometry?.location) {
       const {lat, lng} = details.geometry.location;
-      handleSetDestination(lat, lng, data.description);
+      handleSetDestination(lat, lng, data.structured_formatting?.main_text || data.description, data.description);
     }
   };
 
-  const handleCoordinateSearch = () => {
-    // Simple coordinate parser (format: "lat, lon")
-    const coords = destinationQuery.split(',').map(s => parseFloat(s.trim()));
-    if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
-      handleSetDestination(coords[0], coords[1]);
-    } else {
-      Alert.alert(
-        'Invalid Format',
-        'Please enter coordinates in format: latitude, longitude\nExample: 7.3775, 3.9470',
-      );
-    }
+  const handleRecentSearchSelect = (search: RecentSearch) => {
+    handleSetDestination(search.latitude, search.longitude, search.name, search.description);
+  };
+
+  const handleClearDestination = () => {
+    setDestination(null);
+    setSelectedPlaceName('');
+  };
+
+  const handleClearRecentSearches = async () => {
+    Alert.alert(
+      'Clear Recent Searches',
+      'Are you sure you want to clear all recent searches?',
+      [
+        {text: 'Cancel', style: 'cancel'},
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            await recentSearchesService.clearRecentSearches();
+            await loadRecentSearches();
+          },
+        },
+      ],
+    );
   };
 
   const openGoogleMaps = () => {
@@ -395,6 +429,7 @@ export function MapScreen(): React.JSX.Element {
 
             setIsTripActive(false);
             setDestination(null);
+            setSelectedPlaceName('');
             setTripStats({distanceTraveled: 0, hazardsAvoided: 0});
 
             Alert.alert(
@@ -502,21 +537,15 @@ export function MapScreen(): React.JSX.Element {
         )}
       </MapView>
 
-      <View style={styles.statsOverlay}>
-        {isTripActive ? (
-          <>
-            <Text style={styles.statsText}>🚗 Trip Active</Text>
-            <Text style={styles.tripStatsText}>
-              Distance: {tripService.formatDistance(tripStats.distanceTraveled)} • Hazards Avoided: {tripStats.hazardsAvoided}
-            </Text>
-          </>
-        ) : (
-          <Text style={styles.statsText}>{hazards.length} hazards nearby</Text>
-        )}
-        {!mapTilesLoaded && (
-          <Text style={styles.loadingTilesText}>Loading map tiles...</Text>
-        )}
-      </View>
+      {/* Stats Overlay - Only show when trip is active */}
+      {!searchModalVisible && isTripActive && (
+        <View style={styles.statsOverlay}>
+          <Text style={styles.statsText}>🚗 Trip Active</Text>
+          <Text style={styles.tripStatsText}>
+            {tripService.formatDistance(tripStats.distanceTraveled)} • {tripStats.hazardsAvoided} hazards avoided
+          </Text>
+        </View>
+      )}
 
       <TouchableOpacity style={styles.centerButton} onPress={centerOnUser}>
         <Text style={styles.centerButtonText}>📍</Text>
@@ -526,164 +555,161 @@ export function MapScreen(): React.JSX.Element {
         <Text style={styles.refreshButtonText}>🔄</Text>
       </TouchableOpacity>
 
-      <View style={styles.legendContainer}>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, {backgroundColor: '#FF3B30'}]} />
-          <Text style={styles.legendText}>High</Text>
+      {/* Legend */}
+      {!searchModalVisible && (
+        <View style={styles.legend}>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, {backgroundColor: '#FF0000'}]} />
+            <Text style={styles.legendText}>High</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, {backgroundColor: '#FF9500'}]} />
+            <Text style={styles.legendText}>Medium</Text>
+          </View>
+          <View style={styles.legendItem}>
+            <View style={[styles.legendDot, {backgroundColor: '#FFD700'}]} />
+            <Text style={styles.legendText}>Low</Text>
+          </View>
         </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, {backgroundColor: '#FF9500'}]} />
-          <Text style={styles.legendText}>Medium</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDot, {backgroundColor: '#FFCC00'}]} />
-          <Text style={styles.legendText}>Low</Text>
-        </View>
-      </View>
+      )}
 
-      {/* Trip Control Buttons */}
-      <View style={styles.tripControlsContainer}>
-        {!isTripActive ? (
-          <>
-            <TouchableOpacity
-              style={[styles.tripButton, styles.setDestinationButton]}
-              onPress={() => setShowDestinationModal(true)}>
-              <Text style={styles.tripButtonText}>
-                {destination ? '📍 Change Destination' : '📍 Set Destination'}
-              </Text>
-            </TouchableOpacity>
-            {destination && (
-              <TouchableOpacity
-                style={[styles.tripButton, styles.startTripButton]}
-                onPress={handleStartTrip}>
-                <Text style={styles.tripButtonText}>🚗 Start Trip</Text>
-              </TouchableOpacity>
-            )}
-          </>
-        ) : (
+      {/* Compact Search Bar - Tappable */}
+      {!searchModalVisible && (
+        <View style={styles.compactSearchBar}>
           <TouchableOpacity
-            style={[styles.tripButton, styles.stopTripButton]}
-            onPress={handleStopTrip}>
-            <Text style={styles.tripButtonText}>⏹️ Stop Trip</Text>
+            style={styles.compactSearchInput}
+            onPress={() => setSearchModalVisible(true)}
+            activeOpacity={0.7}>
+            <Text style={styles.compactSearchIcon}>🔍</Text>
+            <Text style={styles.compactSearchText} numberOfLines={1}>
+              {selectedPlaceName && selectedPlaceName.length > 23
+                ? `${selectedPlaceName.substring(0, 23)}...`
+                : selectedPlaceName || 'Start a hazard aware trip'}
+            </Text>
           </TouchableOpacity>
-        )}
-      </View>
+          {selectedPlaceName && (
+            <TouchableOpacity
+              style={styles.clearButton}
+              onPress={handleClearDestination}>
+              <Text style={styles.clearButtonText}>✕</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
-      {/* Destination Search Modal */}
+      {/* Fullscreen Search Modal */}
       <Modal
-        visible={showDestinationModal}
+        visible={searchModalVisible}
         animationType="slide"
         transparent={false}
-        onRequestClose={() => {
-          setShowDestinationModal(false);
-          setUseCoordinates(false);
-          setDestinationQuery('');
-        }}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.modalContainer}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Set Destination</Text>
-            <TouchableOpacity
-              style={styles.modalCloseButton}
-              onPress={() => {
-                setShowDestinationModal(false);
-                setUseCoordinates(false);
-                setDestinationQuery('');
-              }}>
-              <Text style={styles.modalCloseButtonText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.modalToggleContainer}>
-            <TouchableOpacity
-              style={[
-                styles.modalToggleButton,
-                !useCoordinates && styles.modalToggleButtonActive,
-              ]}
-              onPress={() => setUseCoordinates(false)}>
-              <Text
-                style={[
-                  styles.modalToggleText,
-                  !useCoordinates && styles.modalToggleTextActive,
-                ]}>
-                🔍 Search Place
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.modalToggleButton,
-                useCoordinates && styles.modalToggleButtonActive,
-              ]}
-              onPress={() => setUseCoordinates(true)}>
-              <Text
-                style={[
-                  styles.modalToggleText,
-                  useCoordinates && styles.modalToggleTextActive,
-                ]}>
-                📍 Coordinates
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {!useCoordinates ? (
-            <View style={styles.autocompleteContainer}>
-              {googleMapsApiKey ? (
-                <GooglePlacesAutocomplete
-                  placeholder="Search for a place..."
-                  onPress={handlePlaceSelect}
-                  query={{
-                    key: googleMapsApiKey,
-                    language: 'en',
-                  }}
-                  fetchDetails={true}
-                  enablePoweredByContainer={false}
-                  styles={{
-                    textInputContainer: styles.autocompleteInputContainer,
-                    textInput: styles.autocompleteInput,
-                    listView: styles.autocompleteList,
-                    row: styles.autocompleteRow,
-                    description: styles.autocompleteDescription,
-                  }}
-                  nearbyPlacesAPI="GooglePlacesSearch"
-                  debounce={300}
-                />
-              ) : (
-                <View style={styles.noApiKeyContainer}>
-                  <Text style={styles.noApiKeyText}>
-                    Google Maps API key required for place search
-                  </Text>
-                  <Text style={styles.noApiKeyHint}>
-                    Configure in Settings or use Coordinates mode
-                  </Text>
-                </View>
-              )}
-            </View>
-          ) : (
-            <View style={styles.coordinateContainer}>
-              <Text style={styles.coordinateHint}>
-                Enter coordinates (latitude, longitude)
-              </Text>
-              <Text style={styles.coordinateExample}>
-                Example: 7.3775, 3.9470 (Lagos, Nigeria)
-              </Text>
-              <TextInput
-                style={styles.coordinateInput}
-                placeholder="Latitude, Longitude"
-                value={destinationQuery}
-                onChangeText={setDestinationQuery}
-                keyboardType="numbers-and-punctuation"
-                autoFocus
+        onRequestClose={() => setSearchModalVisible(false)}>
+        <View style={styles.fullscreenSearchContainer}>
+          <View style={styles.fullscreenSearchContent}>
+            {googleMapsApiKey ? (
+              <GooglePlacesAutocomplete
+                ref={searchInputRef}
+                placeholder="Where to?"
+                textInputProps={{
+                  autoFocus: true,
+                  clearButtonMode: 'while-editing',
+                }}
+                onPress={handlePlaceSelect}
+                query={{
+                  key: googleMapsApiKey,
+                  language: 'en',
+                }}
+                fetchDetails={true}
+                enablePoweredByContainer={false}
+                styles={{
+                  container: styles.searchContainer,
+                  textInputContainer: styles.searchInputContainer,
+                  textInput: styles.searchInput,
+                  listView: styles.searchListView,
+                  row: styles.searchRow,
+                  description: styles.searchDescription,
+                  poweredContainer: styles.searchPoweredContainer,
+                  powered: styles.searchPowered,
+                }}
+                renderRow={(rowData) => {
+                  const title = rowData.structured_formatting?.main_text || rowData.description;
+                  const subtitle = rowData.structured_formatting?.secondary_text;
+                  return (
+                    <View style={styles.searchRowContent}>
+                      <Text style={styles.searchRowIcon}>📍</Text>
+                      <View style={styles.searchRowTextContainer}>
+                        <Text style={styles.searchRowTitle}>{title}</Text>
+                        {subtitle && <Text style={styles.searchRowSubtitle}>{subtitle}</Text>}
+                      </View>
+                    </View>
+                  );
+                }}
+                nearbyPlacesAPI="GooglePlacesSearch"
+                debounce={300}
+                minLength={2}
               />
-              <TouchableOpacity
-                style={styles.coordinateButton}
-                onPress={handleCoordinateSearch}>
-                <Text style={styles.coordinateButtonText}>Set Destination</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </KeyboardAvoidingView>
+            ) : (
+              <View style={styles.noApiKeyContainer}>
+                <Text style={styles.noApiKeyText}>
+                  Google Maps API key required for place search
+                </Text>
+                <Text style={styles.noApiKeyHint}>
+                  Configure in Settings
+                </Text>
+              </View>
+            )}
+
+            {/* Recent Searches */}
+            {recentSearches.length > 0 && (
+              <View style={styles.recentSearchesContainer}>
+                <View style={styles.recentSearchesHeader}>
+                  <Text style={styles.recentSearchesTitle}>Recent</Text>
+                  <TouchableOpacity onPress={handleClearRecentSearches}>
+                    <Text style={styles.recentSearchesClear}>Clear</Text>
+                  </TouchableOpacity>
+                </View>
+                <FlatList
+                  data={recentSearches}
+                  keyExtractor={(item) => item.id}
+                  renderItem={({item}) => (
+                    <TouchableOpacity
+                      style={styles.recentSearchItem}
+                      onPress={() => handleRecentSearchSelect(item)}>
+                      <Text style={styles.recentSearchIcon}>🕐</Text>
+                      <View style={styles.recentSearchTextContainer}>
+                        <Text style={styles.recentSearchName}>{item.name}</Text>
+                        <Text style={styles.recentSearchDescription}>{item.description}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                />
+              </View>
+            )}
+          </View>
+        </View>
       </Modal>
+
+      {/* Trip Control Buttons */}
+      {!searchModalVisible && (
+        <View style={styles.tripControlsContainer}>
+          {!isTripActive ? (
+            <>
+              {destination && (
+                <TouchableOpacity
+                  style={[styles.tripButton, styles.startTripButton]}
+                  onPress={handleStartTrip}>
+                  <Text style={styles.tripButtonText}>🚗 Start Trip</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : (
+            <TouchableOpacity
+              style={[styles.tripButton, styles.stopTripButton]}
+              onPress={handleStopTrip}>
+              <Text style={styles.tripButtonText}>⏹️ Stop Trip</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -707,9 +733,9 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   loadingTilesText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#FF9500',
-    marginTop: 5,
+    marginTop: 4,
     textAlign: 'center',
   },
   errorTitle: {
@@ -735,12 +761,12 @@ const styles = StyleSheet.create({
   },
   statsOverlay: {
     position: 'absolute',
-    top: 10,
-    left: 10,
-    right: 10,
+    bottom: 20,
+    left: 20,
+    right: 90,
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
-    padding: 12,
+    padding: 10,
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.2,
@@ -748,14 +774,14 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   statsText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#333',
     textAlign: 'center',
   },
   centerButton: {
     position: 'absolute',
-    bottom: 100,
+    bottom: 90,
     right: 20,
     width: 50,
     height: 50,
@@ -774,7 +800,7 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     position: 'absolute',
-    bottom: 160,
+    bottom: 150,
     right: 20,
     width: 50,
     height: 50,
@@ -791,38 +817,8 @@ const styles = StyleSheet.create({
   refreshButtonText: {
     fontSize: 24,
   },
-  legendContainer: {
-    position: 'absolute',
-    bottom: 20,
-    left: 20,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    padding: 12,
-    flexDirection: 'row',
-    shadowColor: '#000',
-    shadowOffset: {width: 0, height: 2},
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 15,
-  },
-  legendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: 6,
-  },
-  legendText: {
-    fontSize: 12,
-    color: '#333',
-    fontWeight: '500',
-  },
   tripStatsText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#666',
     marginTop: 4,
     textAlign: 'center',
@@ -831,7 +827,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 80,
     left: 20,
-    right: 90, // Leave space for center button (50px + 20px margin)
+    right: 90,
     flexDirection: 'row',
     gap: 10,
   },
@@ -846,9 +842,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  setDestinationButton: {
-    backgroundColor: '#007AFF',
-  },
   startTripButton: {
     backgroundColor: '#4CAF50',
   },
@@ -860,95 +853,151 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  // Modal styles
-  modalContainer: {
-    flex: 1,
-    backgroundColor: '#FFFFFF',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  modalCloseButton: {
+  // Legend
+  legend: {
     position: 'absolute',
-    right: 16,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#F5F5F5',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalCloseButtonText: {
-    fontSize: 20,
-    color: '#666',
-  },
-  modalToggleContainer: {
-    flexDirection: 'row',
-    margin: 16,
-    backgroundColor: '#F5F5F5',
-    borderRadius: 8,
-    padding: 4,
-  },
-  modalToggleButton: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderRadius: 6,
-  },
-  modalToggleButtonActive: {
+    top: Platform.OS === 'ios' ? 100 : 70,
+    left: 10,
     backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 8,
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 1},
     shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  modalToggleText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 2,
   },
-  modalToggleTextActive: {
-    color: '#007AFF',
-    fontWeight: '600',
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 6,
   },
-  // Autocomplete styles
-  autocompleteContainer: {
-    flex: 1,
-    padding: 16,
-  },
-  autocompleteInputContainer: {
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 8,
-  },
-  autocompleteInput: {
-    fontSize: 16,
+  legendText: {
+    fontSize: 12,
     color: '#333',
   },
-  autocompleteList: {
-    borderRadius: 8,
-    marginTop: 8,
+  // Compact Search Bar
+  compactSearchBar: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : 10,
+    left: 10,
+    right: 10,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
   },
-  autocompleteRow: {
-    padding: 12,
+  compactSearchInput: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  compactSearchIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  compactSearchText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#666',
+  },
+  clearButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    fontSize: 20,
+    color: '#999',
+    fontWeight: '600',
+  },
+  // Fullscreen Search Modal
+  fullscreenSearchContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  fullscreenSearchContent: {
+    flex: 1,
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
+    paddingHorizontal: 16,
+  },
+  searchContainer: {
+    flex: 0,
+  },
+  searchInputContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    paddingHorizontal: 12,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 1},
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchInput: {
+    fontSize: 16,
+    color: '#333',
+    paddingVertical: 12,
+  },
+  searchListView: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginTop: 8,
+    maxHeight: 300,
+  },
+  searchRow: {
+    padding: 0,
+    margin: 0,
+  },
+  searchDescription: {
+    fontSize: 14,
+    color: '#333',
+  },
+  searchPoweredContainer: {
+    display: 'none',
+  },
+  searchPowered: {
+    display: 'none',
+  },
+  searchRowContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F0F0F0',
   },
-  autocompleteDescription: {
-    fontSize: 14,
+  searchRowIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  searchRowTextContainer: {
+    flex: 1,
+  },
+  searchRowTitle: {
+    fontSize: 15,
     color: '#333',
+    fontWeight: '500',
+  },
+  searchRowSubtitle: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
   },
   noApiKeyContainer: {
     padding: 20,
@@ -965,39 +1014,51 @@ const styles = StyleSheet.create({
     color: '#999',
     textAlign: 'center',
   },
-  // Coordinate input styles
-  coordinateContainer: {
-    flex: 1,
-    padding: 24,
+  // Recent Searches
+  recentSearchesContainer: {
+    marginTop: 24,
   },
-  coordinateHint: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 8,
-  },
-  coordinateExample: {
-    fontSize: 14,
-    color: '#999',
-    marginBottom: 20,
-    fontStyle: 'italic',
-  },
-  coordinateInput: {
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 8,
-    padding: 14,
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  coordinateButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 14,
-    borderRadius: 8,
+  recentSearchesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
   },
-  coordinateButtonText: {
-    color: '#FFFFFF',
+  recentSearchesTitle: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#333',
+  },
+  recentSearchesClear: {
+    fontSize: 14,
+    color: '#007AFF',
+  },
+  recentSearchItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  recentSearchIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  recentSearchTextContainer: {
+    flex: 1,
+  },
+  recentSearchName: {
+    fontSize: 15,
+    color: '#333',
+    fontWeight: '500',
+  },
+  recentSearchDescription: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 2,
   },
 });

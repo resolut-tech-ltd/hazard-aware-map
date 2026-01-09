@@ -63,6 +63,7 @@ function MainTabs({onLogout}: MainTabsProps): React.JSX.Element {
         component={MapScreen}
         options={{
           title: 'Map',
+          headerShown: false,
           tabBarIcon: ({color}) => <Text style={{fontSize: 24}}>🗺️</Text>,
           headerTitle: 'Hazard Map',
         }}
