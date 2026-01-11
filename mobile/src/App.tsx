@@ -8,6 +8,7 @@ import {AuthService} from '@services/AuthService';
 import {LocationService} from '@services/LocationService';
 import {AuthScreen} from '@screens/AuthScreen';
 import {MonitorScreen} from '@screens/MonitorScreen';
+import {VerboseMonitorScreen} from '@screens/VerboseMonitorScreen';
 import {MapScreen} from '@screens/MapScreen';
 import {SettingsScreen} from '@screens/SettingsScreen';
 
@@ -58,6 +59,16 @@ function MainTabs({onLogout}: MainTabsProps): React.JSX.Element {
         }}>
         {() => <MonitorScreen onLogout={onLogout} />}
       </Tab.Screen>
+      <Tab.Screen
+        name="Verbose"
+        component={VerboseMonitorScreen}
+        options={{
+          title: 'Verbose',
+          tabBarIcon: ({color}) => <Text style={{fontSize: 24}}>🔬</Text>,
+          headerTitle: 'Verbose Monitor',
+          headerShown: false,
+        }}
+      />
       <Tab.Screen
         name="Map"
         component={MapScreen}
